@@ -1,15 +1,16 @@
 # Changes in dispy package to allow multicast connection on Windows
 
-It fixes IGMP issue that prevents multicast connection on windows. Both **dispynode.py (Server)** and **dispy (Client)** fail with the following error message:
+It fixes IGMP issue that prevents multicast connection on Windows. Both **dispynode.py (Server)** and **dispy (Client)** fail with the following error message:
 
     socket.error: [Errno 10049] The requested address is not valid in its context
 
+### Installation
 In order to solve this issue, copy the files in this directory to dispy package installation directory:
 
     .\__init__.py       ->       %PY_HOME%\Lib\site-packages\dispy
     .\dispynode.py
 
-References:
+#### References
 
     http://dispy.sourceforge.net/index.html
     https://pycos.sourceforge.io/dispycos.html
@@ -22,7 +23,7 @@ References:
     https://www.cellstream.com/intranet/reference-reading/tipsandtricks/121-ipv6-windowslinux-command-line-examples.html
     http://colorconsole.de/cmd/en/Windows_7/netsh/interface/ipv6/set/global.htm
 
-Changes implemented in dispy package:
+#### Changes implemented in dispy package
 
 %PY_HOME%\Lib\site-packages\dispy\__init__.py
 
