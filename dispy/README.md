@@ -12,16 +12,16 @@ In order to solve this issue, copy the files in this directory to dispy package 
 
 #### References
 
-    http://dispy.sourceforge.net/index.html
-    https://pycos.sourceforge.io/dispycos.html
-    https://rodrigoesilva.wordpress.com/2012/03/21/erros-codigos-de-erros-socket-tcp/
-    https://msdn.microsoft.com/en-gb/library/windows/desktop/ms740668(v=vs.85).aspx
-    http://www.nealc.com/blog/blog/2012/09/11/testing/
-    https://memoria.rnp.br/newsgen/0111/mld5.html
-    https://social.technet.microsoft.com/Forums/windows/pt-BR/0d0da348-3b8b-4790-8aa2-60740a02536f/windows-7-and-igmp-multicast?forum=w7itpronetworking
-    https://technet.microsoft.com/pt-br/library/cc787891(v=ws.10).aspx
-    https://www.cellstream.com/intranet/reference-reading/tipsandtricks/121-ipv6-windowslinux-command-line-examples.html
-    http://colorconsole.de/cmd/en/Windows_7/netsh/interface/ipv6/set/global.htm
+* http://dispy.sourceforge.net/index.html
+* https://pycos.sourceforge.io/dispycos.html
+* https://rodrigoesilva.wordpress.com/2012/03/21/erros-codigos-de-erros-socket-tcp/
+* https://msdn.microsoft.com/en-gb/library/windows/desktop/ms740668(v=vs.85).aspx
+* http://www.nealc.com/blog/blog/2012/09/11/testing/
+* https://memoria.rnp.br/newsgen/0111/mld5.html
+* https://social.technet.microsoft.com/Forums/windows/pt-BR/0d0da348-3b8b-4790-8aa2-60740a02536f/windows-7-and-igmp-multicast?forum=w7itpronetworking
+* https://technet.microsoft.com/pt-br/library/cc787891(v=ws.10).aspx
+* https://www.cellstream.com/intranet/reference-reading/tipsandtricks/121-ipv6-windowslinux-command-line-examples.html
+* http://colorconsole.de/cmd/en/Windows_7/netsh/interface/ipv6/set/global.htm
 
 #### Changes implemented in dispy package
 
