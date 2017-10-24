@@ -1,6 +1,8 @@
 # crawler
 Distributed web crawler in Python
 
+# Installation
+
 Install Python latest version in Windows:
 	#python 3.6.3 - 2017-10-03
 	Python 3.4.4 - 2015-12-21
@@ -53,6 +55,52 @@ Disable VirtualBox or any other virtual machine network adapter.
 
 
 
-Changes in dispy to work in Windows:
-C:\Python34\Lib\site-packages\dispy\__init__.py
-C:\Python34\Lib\site-packages\dispy\dispynode.py
+Changes in dispy package in order to work in Windows:
+%PY_HOME%\Lib\site-packages\dispy\__init__.py
+
+    369,373c369,374
+    <         if not broadcast:
+    <             broadcast = 'ff05::1'
+    <    else:
+    <         if not broadcast:
+    <             broadcast = '<broadcast>'
+    ---
+    >         # CHANGED
+    >         #if not broadcast:
+    >         broadcast = 'ff05::1'
+    <    else:
+    >         #if not broadcast:
+    >         broadcast = '<broadcast>'
+
+    804,807c805,809
+    <                     if addrinfo.broadcast == '<broadcast>':  # or addrinfo.broadcast == 'ff05::1'
+    <                         bind_addr = ''
+    <                     else:
+    <                         bind_addr = addrinfo.broadcast
+    ---
+    >                     # CHANGED
+    >                     #if addrinfo.broadcast == '<broadcast>':  # or addrinfo.broadcast == 'ff05::1'
+    >                     bind_addr = ''
+    >                     #else:
+    >                     #    bind_addr = addrinfo.broadcast
+
+    836c838,839
+    <             udp_sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+    ---
+    >             # CHANGED
+    >             #udp_sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+
+
+%PY_HOME%\Lib\site-packages\dispy\dispynode.py
+
+    363,366c363,367
+    <             if addrinfo.broadcast == '<broadcast>':  # or addrinfo.broadcast == 'ff05::1'
+    <                 bind_addr = ''
+    <             else:
+    <                 bind_addr = addrinfo.broadcast
+    ---
+    >             # CHANGED
+    >             #if addrinfo.broadcast == '<broadcast>':  # or addrinfo.broadcast == 'ff05::1'
+    >             bind_addr = ''
+    >             #else:
+    >             #    bind_addr = addrinfo.broadcast
