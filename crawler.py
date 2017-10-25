@@ -290,7 +290,11 @@ def parse_options():
                       action="store", type="int", dest="cluster_jobs",
                       default=0, help="Number of jobs to run in cluster nodes")
 
-    opts, args = parser.parse_args()
+    try:
+        opts, args = parser.parse_args()
+    except:
+        parser.print_help(sys.stderr)
+        raise SystemExit(1)
 
     if not opts.resume and ((len(args) < 1 and not opts.urlfile) or (len(args) > 0 and opts.urlfile)):
         parser.print_help(sys.stderr)

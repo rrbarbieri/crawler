@@ -51,3 +51,33 @@ A .csv file with a list of the found products can be generated at the end.
 
 * Disable VirtualBox adapter or any other virtual machine network adapter so that dispy will not select it for connection.
 
+### Execution
+
+**crawler.py** can either run in standalone mode or in cluster mode. To run in cluster mode, install the above python packages in the cluster nodes as well and then invoke **dispynode.py --clean** in every node. Please refer to **dispynode (Server)** (http://dispy.sourceforge.net/dispynode.html) for more options.
+
+Launch **crawler.py** with the following options:
+
+e.g. **crawler.py -U crawler -p abc123 -u sites.txt -c products -j 5**
+
+In the above example, the database user 'crawler' must have privileges to create and drop schemas and tables.
+
+    Usage: crawler.py [options]
+
+    Options:
+      -h, --help            show this help message and exit
+      -u URLFILE, --urlfile=URLFILE
+                            File with URL list to crawl
+      -c CSVFILE, --csvfile=CSVFILE
+                            CSV File to write product list
+      -U DBUSER, --dbuser=DBUSER
+                            Database user
+      -p DBPASS, --dbpass=DBPASS
+                            Database password
+      -H DBHOST, --dbhost=DBHOST
+                            Database host name
+      -P DBPORT, --dbport=DBPORT
+                            Database port
+      -r, --resume          Resume previous crawl after an interruption
+      -j CLUSTER_JOBS, --cluster-jobs=CLUSTER_JOBS
+                            Number of jobs to run in cluster nodes
+
