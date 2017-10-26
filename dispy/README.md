@@ -2,7 +2,7 @@
 
 It fixes IGMP issue that prevents multicast connection on Windows. Both **dispynode.py (Server)** and **dispy (Client)** fail with the following error message:
 
-    socket.error: [Errno 10049] The requested address is not valid in its context
+    OSError: [WinError 10049] O endereço solicitado não é válido no contexto
 
 ### Installation
 In order to solve this issue, copy the files in this directory to dispy package installation directory:

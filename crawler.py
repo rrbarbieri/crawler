@@ -1,9 +1,178 @@
 #!/usr/bin/env python
 
+# executed on client only
+# variables declared below, including imported modules,
+# are not available in jobs running in cluster nodes
+import dispy
+import sys
+import enum
+import csv
+
+from sqlalchemy import (create_engine, Column, Integer, String)
+from sqlalchemy.engine.url import URL
+from sqlalchemy.orm import Session
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy_enum34 import EnumType
+
+base = declarative_base()
+
+
+class Status(enum.Enum):
+    new = 'new'
+    visited = 'visited'
+    error = 'error'
+
+
+# declare Link database table
+class Link(base):
+    __tablename__ = 'link'
+
+    depth = Column(Integer, primary_key=True)
+    url = Column(String(1022), primary_key=True)
+    status = Column(EnumType(Status, name='url_status'), nullable=False, default=Status.new, index=True)
+
+    def __init__(self, url, depth=1, status=Status.new):
+        self.url = url
+        self.depth = depth
+        self.status = status
+
+
+# declare Product database table
+class Product(base):
+    __tablename__ = 'product'
+
+    url = Column(String(1022), primary_key=True)
+    title = Column(String(256), nullable=False)
+    name = Column(String(256), nullable=False)
+
+    def __init__(self, url, title, name):
+        self.url = url
+        self.title = title
+        self.name = name
+
+
 class Crawler(object):
+    # executed on node when running in cluster mode
+    # variables declared below, including imported modules,
+    # are available only in jobs running in cluster nodes
+    from sqlalchemy.ext.declarative import declarative_base
+
+    base = declarative_base()
+
+    # declare Link database table
+    class Link(base):
+        import enum
+        from sqlalchemy import (Column, Integer, String)
+        from sqlalchemy_enum34 import EnumType
+
+        class Status(enum.Enum):
+            new = 'new'
+            visited = 'visited'
+            error = 'error'
+
+        __tablename__ = 'link'
+
+        depth = Column(Integer, primary_key=True)
+        url = Column(String(1022), primary_key=True)
+        status = Column(EnumType(Status, name='url_status'), nullable=False, default=Status.new, index=True)
+
+        def __init__(self, url, depth=1, status=Status.new):
+            self.url = url
+            self.depth = depth
+            self.status = status
+
+    # declare Product database table
+    class Product(base):
+        from sqlalchemy import (Column, String)
+
+        __tablename__ = 'product'
+
+        url = Column(String(1022), primary_key=True)
+        title = Column(String(256), nullable=False)
+        name = Column(String(256), nullable=False)
+
+        def __init__(self, url, title, name):
+            self.url = url
+            self.title = title
+            self.name = name
+
+    class Webpage(object):
+
+        class OpaqueDataException(Exception):
+            def __init__(self, message, mimetype, url):
+                Exception.__init__(self, message)
+                self.mimetype = mimetype
+                self.url = url
+
+        # retrieves and interprets web pages
+        def __init__(self, url):
+            self.url = url
+            self.product_name = None
+            self.title = None
+            self.out_urls = []
+
+        def _open(self):
+            import urllib.request
+
+            url = self.url
+            try:
+                request = urllib.request.Request(url)
+                handle = urllib.request.build_opener()
+            except IOError:
+                return None
+            return request, handle
+
+        def fetch(self):
+            import re
+            import urllib.parse
+            import urllib.error
+            from html import escape
+            from bs4 import BeautifulSoup
+
+            request, handle = self._open()
+            if handle:
+                try:
+                    data = handle.open(request)
+                    mime_type = data.info().get_content_type()
+                    url = data.geturl()
+                    if mime_type != "text/html":
+                        raise self.OpaqueDataException("Not interested in files of type %s" % mime_type,
+                                                       mime_type, url)
+                    content = str(data.read(), "utf-8", errors="replace")
+                    soup = BeautifulSoup(content, "html.parser")
+
+                    product_name = soup.find("div", {"class": re.compile(r"(?i)product(?:name|title)")})
+                    if product_name is not None:
+                        self.product_name = product_name.renderContents().decode('utf-8')
+
+                    title = soup('title')[0]
+                    if title is not None:
+                        self.title = title.renderContents().decode('utf-8')
+
+                    tags = soup('a')
+
+                except urllib.error.HTTPError as error:
+                    if error.code == 404:
+                        print("ERROR: %s -> %s" % (error, error.url))
+                    else:
+                        print("ERROR: %s" % error)
+                    tags = []
+                except urllib.error.URLError as error:
+                    print("ERROR: %s" % error)
+                    tags = []
+                except self.OpaqueDataException:
+                    tags = []
+
+                for tag in tags:
+                    href = tag.get("href")
+                    if href is not None:
+                        url = urllib.parse.urljoin(self.url, escape(href))
+                        if url not in self.url and bool(urllib.parse.urlparse(url).netloc):
+                            self.out_urls.append(url)
+
     def __init__(self, i, dbuser, dbpass, dbhost, dbport):
 
-        self.i = i
+        self.job_num = i
 
         # database connection
         self.dbuser = dbuser
@@ -12,6 +181,7 @@ class Crawler(object):
         self.dbport = dbport
 
         self.num_processed = 0  # Links processed
+        self.host = ''  # root URL
 
         # Pre-visit filters:  only visit a URL if it passes these tests
         self.pre_visit_filters = [self._same_host]
@@ -48,122 +218,14 @@ class Crawler(object):
         return bool(page.product_name and page.product_name.strip())
 
     def crawl(self):
-        # executed on node when running in cluster mode
-        # variables declared below, including imported modules,
-        # are available only in jobs running in cluster nodes
         import math
-        import re
-        import enum
         import time
-        import urllib.error
         import urllib.parse
         import urllib.request
-        from html import escape
-        from bs4 import BeautifulSoup
 
-        from sqlalchemy import (create_engine, Column, Integer, String, exc)
+        from sqlalchemy import (create_engine, exc)
         from sqlalchemy.engine.url import URL
         from sqlalchemy.orm import Session
-        from sqlalchemy.ext.declarative import declarative_base
-        from sqlalchemy_enum34 import EnumType
-
-        Base = declarative_base()
-
-        class Status(enum.Enum):
-            new = 'new'
-            visited = 'visited'
-            error = 'error'
-
-        # declare Link database table
-        class Link(Base):
-            __tablename__ = 'link'
-
-            depth = Column(Integer, primary_key=True)
-            url = Column(String(1022), primary_key=True)
-            status = Column(EnumType(Status, name='url_status'), nullable=False, default=Status.new, index=True)
-
-            def __init__(self, url, depth=1, status=Status.new):
-                self.url = url
-                self.depth = depth
-                self.status = status
-
-        # declare Product database table
-        class Product(Base):
-            __tablename__ = 'product'
-            url = Column(String(1022), primary_key=True)
-            title = Column(String(256), nullable=False)
-            name = Column(String(256), nullable=False)
-
-            def __init__(self, url, title, name):
-                self.url = url
-                self.title = title
-                self.name = name
-
-        class OpaqueDataException(Exception):
-            def __init__(self, message, mimetype, url):
-                Exception.__init__(self, message)
-                self.mimetype = mimetype
-                self.url = url
-
-        class Webpage(object):
-            # retrieves and interprets web pages
-            def __init__(self, url):
-                self.url = url
-                self.product_name = None
-                self.title = None
-                self.out_urls = []
-
-            def _open(self):
-                url = self.url
-                try:
-                    request = urllib.request.Request(url)
-                    handle = urllib.request.build_opener()
-                except IOError:
-                    return None
-                return (request, handle)
-
-            def fetch(self):
-                request, handle = self._open()
-                # self._addHeaders(request)
-                if handle:
-                    try:
-                        data = handle.open(request)
-                        mime_type = data.info().get_content_type()
-                        url = data.geturl()
-                        if mime_type != "text/html":
-                            raise OpaqueDataException("Not interested in files of type %s" % mime_type,
-                                                      mime_type, url)
-                        content = str(data.read(), "utf-8", errors="replace")
-                        soup = BeautifulSoup(content, "html.parser")
-
-                        product_name = soup.find("div", {"class": re.compile(r"(?i)product(?:name|title)")})
-                        if product_name is not None:
-                            self.product_name = product_name.renderContents().decode('utf-8')
-
-                        title = soup('title')[0]
-                        if title is not None:
-                            self.title = title.renderContents().decode('utf-8')
-
-                        tags = soup('a')
-
-                    except urllib.error.HTTPError as error:
-                        if error.code == 404:
-                            print("ERROR: %s -> %s" % (error, error.url))
-                        else:
-                            print("ERROR: %s" % error)
-                        tags = []
-                    except urllib.error.URLError as error:
-                        print("ERROR: %s" % error)
-                        tags = []
-                    except OpaqueDataException as error:
-                        tags = []
-
-                    for tag in tags:
-                        href = tag.get("href")
-                        if href is not None:
-                            url = urllib.parse.urljoin(self.url, escape(href))
-                            if url not in self.url and bool(urllib.parse.urlparse(url).netloc):
-                                self.out_urls.append(url)
 
         # connect to database
         engine = create_engine(URL("mysql+mysqlconnector",
@@ -176,76 +238,91 @@ class Crawler(object):
         engine.execute("USE crawler")  # select db
         session = Session(engine)
 
-        sTime = time.time()
+        start_time = time.time()
 
-        # Process same site first
-        link = session.query(Link).filter(Link.depth > 1, Link.status==Status.new).with_for_update().first()
-        if not link:
-            link = session.query(Link).filter_by(status=Status.new).with_for_update().first()
+        num_retries = 3
+        if self.job_num:
+            attempts = num_retries  # running in cluster mode
+            # retry if new links are not available momentarily,
+            # otherwise process has finished
+        else:
+            attempts = 1  # running in standalone mode
+            # no retry
 
-        while link:
-            this_url = link.url
-            link_depth = link.depth + 1
-            self.num_processed += 1
-            self.host = urllib.parse.urlparse(this_url)[1]
+        while attempts:
+            # process same site first
+            link = session.query(self.Link).filter(self.Link.depth > 1, self.Link.status == self.Link.Status.new).with_for_update().first()
+            if not link:
+                link = session.query(self.Link).filter_by(status=self.Link.Status.new).with_for_update().first()
 
-            status = Status.visited
-            try:
-                page = Webpage(this_url)
-                page.fetch()
-                for link_url in [self._pre_visit_url_condense(l) for l in page.out_urls]:
-                    # apply pre-visit filters.
-                    do_not_follow = [f for f in self.pre_visit_filters if not f(link_url)]
+            while link:
+                attempts = num_retries  # restart attempts
+                this_url = link.url
+                link_depth = link.depth + 1
+                self.num_processed += 1
+                self.host = urllib.parse.urlparse(this_url)[1]
 
-                    # if no filters failed, process URL
-                    if [] == do_not_follow:
-                        new_link = Link(link_url, depth=link_depth)
-                        session.begin_nested() # establish a savepoint
-                        session.add(new_link)
+                status = self.Link.Status.visited
+                try:
+                    page = self.Webpage(this_url)
+                    page.fetch()
+                    for link_url in [self._pre_visit_url_condense(l) for l in page.out_urls]:
+                        # apply pre-visit filters.
+                        do_not_follow = [f for f in self.pre_visit_filters if not f(link_url)]
+
+                        # if no filters failed, process URL
+                        if [] == do_not_follow:
+                            new_link = self.Link(link_url, depth=link_depth)
+                            session.begin_nested()  # establish a savepoint
+                            session.add(new_link)
+                            try:
+                                session.flush()
+                            except exc.IntegrityError:  # rollback duplicated entry
+                                session.rollback()
+                                continue
+                            except:
+                                session.rollback()
+                                raise
+                            session.commit()
+
+                    # apply product filters.
+                    is_product = [f for f in self.product_filters if not f(page)]
+
+                    # if no filters failed, process product
+                    if [] == is_product:
+                        product = self.Product(this_url, title=page.title, name=page.product_name)
+                        session.begin_nested()  # establish a savepoint
+                        session.add(product)
                         try:
                             session.flush()
-                        except exc.IntegrityError: # rollback duplicated entry
-                            session.rollback()
-                            continue
                         except:
                             session.rollback()
                             raise
                         session.commit()
 
-                # apply product filters.
-                is_product = [f for f in self.product_filters if not f(page)]
+                except Exception as e:
+                    print("ERROR: Can't process url '%s' (%s)" % (this_url, e))
+                    status = self.Link.Status.error
 
-                # if no filters failed, process product
-                if [] == is_product:
-                    product = Product(this_url, title=page.title, name=page.product_name)
-                    session.begin_nested()  # establish a savepoint
-                    session.add(product)
-                    try:
-                        session.flush()
-                    except:
-                        session.rollback()
-                        raise
-                    session.commit()
+                link.status = status
+                session.commit()
 
+                # process same site first
+                link = session.query(self.Link).filter(self.Link.depth > 1, self.Link.status == self.Link.Status.new).with_for_update().first()
+                if not link:
+                    link = session.query(self.Link).filter_by(status=self.Link.Status.new).with_for_update().first()
 
-            except Exception as e:
-                print("ERROR: Can't process url '%s' (%s)" % (this_url, e))
-                status = Status.error
+            # sleep if running in cluster mode
+            if self.job_num:
+                time.sleep(5)
+            attempts -= 1
 
-            link.status = status
-            session.commit()
-
-            # process same site first
-            link = session.query(Link).filter(Link.depth > 1, Link.status == Status.new).with_for_update().first()
-            if not link:
-                link = session.query(Link).filter_by(status=Status.new).with_for_update().first()
-
-        eTime = time.time()
-        tTime = eTime - sTime
+        end_time = time.time()
+        time_diff = end_time - start_time
 
         print("\tProcessed:    %d" % self.num_processed)
         print("\tStats:        %d/s after %0.2fs" % (
-            int(math.ceil(float(self.num_processed) / tTime)), tTime))
+            int(math.ceil(float(self.num_processed) / time_diff)), time_diff))
 
         session.close()
         engine.dispose()
@@ -301,7 +378,7 @@ def parse_options():
         parser.error("pass an URL as an argument or use option -f")
         raise SystemExit(1)
 
-    if  opts.resume and (len(args) > 0 or opts.urlfile):
+    if opts.resume and (len(args) > 0 or opts.urlfile):
         parser.print_help(sys.stderr)
         parser.error("option -r cannot be used with option -f nor with an argument")
         raise SystemExit(1)
@@ -317,51 +394,6 @@ def compute(obj):
 
 
 def main():
-    # executed on client only
-    # variables declared below, including imported modules,
-    # are not available in jobs running in cluster nodes
-    import dispy
-    import sys
-    import enum
-    import csv
-
-    from sqlalchemy import (create_engine, Column, Integer, String, exc)
-    from sqlalchemy.engine.url import URL
-    from sqlalchemy.orm import Session
-    from sqlalchemy.ext.declarative import declarative_base
-    from sqlalchemy_enum34 import EnumType
-
-    Base = declarative_base()
-
-    class Status(enum.Enum):
-        new = 'new'
-        visited = 'visited'
-        error = 'error'
-
-    # declare Link database table
-    class Link(Base):
-        __tablename__ = 'link'
-
-        depth = Column(Integer, primary_key=True)
-        url = Column(String(1022), primary_key=True)
-        status = Column(EnumType(Status, name='url_status'), nullable=False, default=Status.new, index=True)
-
-        def __init__(self, url, depth=1, status=Status.new):
-            self.url = url
-            self.depth = depth
-            self.status = status
-
-    # declare Product database table
-    class Product(Base):
-        __tablename__ = 'product'
-        url = Column(String(1022), primary_key=True)
-        title = Column(String(256), nullable=False)
-        name = Column(String(256), nullable=False)
-
-        def __init__(self, url, title, name):
-            self.url = url
-            self.title = title
-            self.name = name
 
     # parse command line options
     opts, args = parse_options()
@@ -377,11 +409,11 @@ def main():
 
     # connect to database
     engine = create_engine(URL("mysql+mysqlconnector",
-        username=dbuser,
-        password=dbpass,
-        host=dbhost,
-        port=dbport
-        ))
+                               username=dbuser,
+                               password=dbpass,
+                               host=dbhost,
+                               port=dbport
+                               ))
 
     # create database schema
     engine.execute("CREATE DATABASE IF NOT EXISTS crawler")
@@ -395,22 +427,22 @@ def main():
                 with open(urlfile, 'r') as file:
                     url_list = [line.strip() for line in file.readlines()]
                 if not url_list:
-                    print ("No data in file %s" % urlfile)
+                    print("No data in file %s" % urlfile)
                     raise SystemExit(1)
                 print("Read file %s" % urlfile)
             except IOError as error:
                 print("I/O error({0}): {1}".format(error.errno, error.strerror))
                 raise SystemExit(1)
-            except: # handle other exceptions such as attribute errors
+            except:  # handle other exceptions such as attribute errors
                 print("Unexpected error:", sys.exc_info()[0])
                 raise SystemExit(1)
         else:
             # URL in command line argument
-            url_list=[args[0]]
+            url_list = [args[0]]
 
         # clean database
-        Base.metadata.drop_all(engine)
-        Base.metadata.create_all(engine)
+        base.metadata.drop_all(engine)
+        base.metadata.create_all(engine)
 
         session = Session(engine)
 
@@ -428,17 +460,17 @@ def main():
         # 'compute' needs definition of class Crawler
         cluster = dispy.JobCluster(compute, depends=[Crawler])
         jobs = []
-        for i in range(cluster_jobs):
+        for i in range(1, cluster_jobs + 1):
             crawler = Crawler(i, dbuser, dbpass, dbhost, dbport)  # create object of Crawler
-            job = cluster.submit(crawler) # it is sent to a node for executing 'compute'
-            job.id = crawler # store this object for later use
+            job = cluster.submit(crawler)  # it is sent to a node for executing 'compute'
+            job.id = crawler  # store this object for later use
             jobs.append(job)
 
         # waits until all jobs finish
         for job in jobs:
-            job() # wait for job to finish
-            print('Job %s:\n%s' % (job.id.i, job.stdout))
-    else: # run in standalone mode
+            job()  # wait for job to finish
+            print('Job %s:\n%s\n%s\n%s' % (job.id.job_num, job.stdout, job.stderr, job.exception))
+    else:  # run in standalone mode
         crawler = Crawler(0, dbuser, dbpass, dbhost, dbport)
         crawler.crawl()
 
@@ -468,7 +500,7 @@ def main():
         except IOError as error:
             print("I/O error({0}): {1}".format(error.errno, error.strerror))
             raise SystemExit(1)
-        except: # handle other exceptions such as attribute errors
+        except:  # handle other exceptions such as attribute errors
             print("Unexpected error:", sys.exc_info()[0])
             raise SystemExit(1)
 
