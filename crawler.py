@@ -1,176 +1,22 @@
-#!/usr/bin/env python
-
 # executed on client only
 # variables declared below, including imported modules,
 # are not available in jobs running in cluster nodes
 import dispy
 import sys
-import enum
 import csv
+from crawler_db import (Base, Link, Product)
 
-from sqlalchemy import (create_engine, Column, Integer, String)
+from sqlalchemy import (create_engine)
 from sqlalchemy.engine.url import URL
 from sqlalchemy.orm import Session
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy_enum34 import EnumType
-
-base = declarative_base()
-
-
-class Status(enum.Enum):
-    new = 'new'
-    visited = 'visited'
-    error = 'error'
-
-
-# declare Link database table
-class Link(base):
-    __tablename__ = 'link'
-
-    depth = Column(Integer, primary_key=True)
-    url = Column(String(1022), primary_key=True)
-    status = Column(EnumType(Status, name='url_status'), nullable=False, default=Status.new, index=True)
-
-    def __init__(self, url, depth=1, status=Status.new):
-        self.url = url
-        self.depth = depth
-        self.status = status
-
-
-# declare Product database table
-class Product(base):
-    __tablename__ = 'product'
-
-    url = Column(String(1022), primary_key=True)
-    title = Column(String(256), nullable=False)
-    name = Column(String(256), nullable=False)
-
-    def __init__(self, url, title, name):
-        self.url = url
-        self.title = title
-        self.name = name
 
 
 class Crawler(object):
     # executed on node when running in cluster mode
     # variables declared below, including imported modules,
     # are available only in jobs running in cluster nodes
-    from sqlalchemy.ext.declarative import declarative_base
 
-    base = declarative_base()
-
-    # declare Link database table
-    class Link(base):
-        import enum
-        from sqlalchemy import (Column, Integer, String)
-        from sqlalchemy_enum34 import EnumType
-
-        class Status(enum.Enum):
-            new = 'new'
-            visited = 'visited'
-            error = 'error'
-
-        __tablename__ = 'link'
-
-        depth = Column(Integer, primary_key=True)
-        url = Column(String(1022), primary_key=True)
-        status = Column(EnumType(Status, name='url_status'), nullable=False, default=Status.new, index=True)
-
-        def __init__(self, url, depth=1, status=Status.new):
-            self.url = url
-            self.depth = depth
-            self.status = status
-
-    # declare Product database table
-    class Product(base):
-        from sqlalchemy import (Column, String)
-
-        __tablename__ = 'product'
-
-        url = Column(String(1022), primary_key=True)
-        title = Column(String(256), nullable=False)
-        name = Column(String(256), nullable=False)
-
-        def __init__(self, url, title, name):
-            self.url = url
-            self.title = title
-            self.name = name
-
-    class Webpage(object):
-
-        class OpaqueDataException(Exception):
-            def __init__(self, message, mimetype, url):
-                Exception.__init__(self, message)
-                self.mimetype = mimetype
-                self.url = url
-
-        # retrieves and interprets web pages
-        def __init__(self, url):
-            self.url = url
-            self.product_name = None
-            self.title = None
-            self.out_urls = []
-
-        def _open(self):
-            import urllib.request
-
-            url = self.url
-            try:
-                request = urllib.request.Request(url)
-                handle = urllib.request.build_opener()
-            except IOError:
-                return None
-            return request, handle
-
-        def fetch(self):
-            import re
-            import urllib.parse
-            import urllib.error
-            from html import escape
-            from bs4 import BeautifulSoup
-
-            request, handle = self._open()
-            if handle:
-                try:
-                    data = handle.open(request)
-                    mime_type = data.info().get_content_type()
-                    url = data.geturl()
-                    if mime_type != "text/html":
-                        raise self.OpaqueDataException("Not interested in files of type %s" % mime_type,
-                                                       mime_type, url)
-                    content = str(data.read(), "utf-8", errors="replace")
-                    soup = BeautifulSoup(content, "html.parser")
-
-                    product_name = soup.find("div", {"class": re.compile(r"(?i)product(?:name|title)")})
-                    if product_name is not None:
-                        self.product_name = product_name.renderContents().decode('utf-8')
-
-                    title = soup('title')[0]
-                    if title is not None:
-                        self.title = title.renderContents().decode('utf-8')
-
-                    tags = soup('a')
-
-                except urllib.error.HTTPError as error:
-                    if error.code == 404:
-                        print("ERROR: %s -> %s" % (error, error.url))
-                    else:
-                        print("ERROR: %s" % error)
-                    tags = []
-                except urllib.error.URLError as error:
-                    print("ERROR: %s" % error)
-                    tags = []
-                except self.OpaqueDataException:
-                    tags = []
-
-                for tag in tags:
-                    href = tag.get("href")
-                    if href is not None:
-                        url = urllib.parse.urljoin(self.url, escape(href))
-                        if url not in self.url and bool(urllib.parse.urlparse(url).netloc):
-                            self.out_urls.append(url)
-
-    def __init__(self, i, dbuser, dbpass, dbhost, dbport):
+    def __init__(self, i=0, dbuser='', dbpass='', dbhost='', dbport=0):
 
         self.job_num = i
 
@@ -222,6 +68,8 @@ class Crawler(object):
         import time
         import urllib.parse
         import urllib.request
+        from crawler_db import (Status, Link, Product)
+        from crawler_web import Webpage
 
         from sqlalchemy import (create_engine, exc)
         from sqlalchemy.engine.url import URL
@@ -235,7 +83,7 @@ class Crawler(object):
                                    port=self.dbport
                                    ))
 
-        engine.execute("USE crawler")  # select db
+        engine.execute("USE crawler")  # select database
         session = Session(engine)
 
         start_time = time.time()
@@ -251,9 +99,9 @@ class Crawler(object):
 
         while attempts:
             # process same site first
-            link = session.query(self.Link).filter(self.Link.depth > 1, self.Link.status == self.Link.Status.new).with_for_update().first()
+            link = session.query(Link).filter(Link.depth > 1, Link.status == Status.new).with_for_update().first()
             if not link:
-                link = session.query(self.Link).filter_by(status=self.Link.Status.new).with_for_update().first()
+                link = session.query(Link).filter_by(status=Status.new).with_for_update().first()
 
             while link:
                 attempts = num_retries  # restart attempts
@@ -262,9 +110,9 @@ class Crawler(object):
                 self.num_processed += 1
                 self.host = urllib.parse.urlparse(this_url)[1]
 
-                status = self.Link.Status.visited
+                status = Status.visited
                 try:
-                    page = self.Webpage(this_url)
+                    page = Webpage(this_url)
                     page.fetch()
                     for link_url in [self._pre_visit_url_condense(l) for l in page.out_urls]:
                         # apply pre-visit filters.
@@ -272,7 +120,7 @@ class Crawler(object):
 
                         # if no filters failed, process URL
                         if [] == do_not_follow:
-                            new_link = self.Link(link_url, depth=link_depth)
+                            new_link = Link(link_url, depth=link_depth)
                             session.begin_nested()  # establish a savepoint
                             session.add(new_link)
                             try:
@@ -290,7 +138,7 @@ class Crawler(object):
 
                     # if no filters failed, process product
                     if [] == is_product:
-                        product = self.Product(this_url, title=page.title, name=page.product_name)
+                        product = Product(this_url, title=page.title, name=page.product_name)
                         session.begin_nested()  # establish a savepoint
                         session.add(product)
                         try:
@@ -302,15 +150,15 @@ class Crawler(object):
 
                 except Exception as e:
                     print("ERROR: Can't process url '%s' (%s)" % (this_url, e))
-                    status = self.Link.Status.error
+                    status = Status.error
 
                 link.status = status
                 session.commit()
 
                 # process same site first
-                link = session.query(self.Link).filter(self.Link.depth > 1, self.Link.status == self.Link.Status.new).with_for_update().first()
+                link = session.query(Link).filter(Link.depth > 1, Link.status == Status.new).with_for_update().first()
                 if not link:
-                    link = session.query(self.Link).filter_by(status=self.Link.Status.new).with_for_update().first()
+                    link = session.query(Link).filter_by(status=Status.new).with_for_update().first()
 
             # sleep if running in cluster mode
             if self.job_num:
@@ -320,21 +168,24 @@ class Crawler(object):
         end_time = time.time()
         time_diff = end_time - start_time
 
+        rate = 0
+        if time_diff:
+            rate = int(math.ceil(float(self.num_processed) / time_diff))
+
         print("\tProcessed:    %d" % self.num_processed)
-        print("\tStats:        %d/s after %0.2fs" % (
-            int(math.ceil(float(self.num_processed) / time_diff)), time_diff))
+        print("\tStats:        %d/s after %0.2fs" % (rate, time_diff))
 
         session.close()
         engine.dispose()
 
 
 def parse_options():
-    import optparse
     import sys
+    from optparse import OptionParser
 
     # parse any given command-line options returning
     # both the parsed options and arguments.
-    parser = optparse.OptionParser()
+    parser = OptionParser()
 
     parser.add_option("-u", "--urlfile",
                       action="store", type="string", dest="urlfile",
@@ -441,8 +292,8 @@ def main():
             url_list = [args[0]]
 
         # clean database
-        base.metadata.drop_all(engine)
-        base.metadata.create_all(engine)
+        Base.metadata.drop_all(engine)
+        Base.metadata.create_all(engine)
 
         session = Session(engine)
 
