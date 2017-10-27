@@ -1,37 +1,8 @@
-from unittest import TestCase
-import os
-
-from sqlalchemy import (create_engine)
-from sqlalchemy.orm import (scoped_session, sessionmaker)
+from test_dbhandler import DBHandler
 
 from crawler import Crawler
-from crawler_db import (Base, Status, Link, Product)
+from crawler_db import (Status, Link, Product)
 from crawler_web import Webpage
-
-
-class DBHandler(TestCase):
-
-    def init_engine(self):
-        # get database connection URL from DBURL environment variable
-        # DBURL="mysql+mysqlconnector://crawler:abc123@localhost"
-        url = os.environ['DBURL']
-        self.engine = create_engine(url)
-
-        # create distinct database sessions per each test case
-        self.Session = scoped_session(sessionmaker())
-        self.Session.configure(bind=self.engine)
-
-    def del_engine(self):
-        self.Session.remove()
-        self.engine.dispose()
-
-    def setup_db(self, dbschema):
-        self.engine.execute("CREATE DATABASE IF NOT EXISTS " + dbschema)
-        self.engine.execute("USE " + dbschema)
-
-        # clean database
-        Base.metadata.drop_all(self.engine)
-        Base.metadata.create_all(self.engine)
 
 
 class TestCrawler(DBHandler):
@@ -220,7 +191,6 @@ class TestCrawler(DBHandler):
             self.assertEqual(product.url, url)
             self.assertEqual(product.title, title)
             self.assertEqual(product.name, name)
-
 
     def test_crawl_no_product(self):
         dbschema = "test_crawl_no_product"

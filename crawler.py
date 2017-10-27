@@ -191,7 +191,7 @@ class Crawler(object):
         return 0
 
 
-def parse_options():
+def parse_options(sysargs):
     import sys
     from optparse import OptionParser
 
@@ -223,6 +223,10 @@ def parse_options():
                       action="store", type="string", dest="dbport",
                       help="Database port"),
 
+    parser.add_option("-s", "--dbschema",
+                      action="store", type="string", dest="dbschema",
+                      default="crawler", help="Database schema"),
+
     parser.add_option("-d", "--depth",
                       action="store", type="int", default=0, dest="depth",
                       help="Maximum depth to traverse")
@@ -235,20 +239,20 @@ def parse_options():
                       default=0, help="Number of jobs to run in cluster nodes")
 
     try:
-        opts, args = parser.parse_args()
+        opts, args = parser.parse_args(sysargs)
     except:
         parser.print_help(sys.stderr)
-        raise SystemExit(1)
+        return [], []
 
     if not opts.resume and ((len(args) < 1 and not opts.urlfile) or (len(args) > 0 and opts.urlfile)):
         parser.print_help(sys.stderr)
-        parser.error("pass an URL as an argument or use option -f")
-        raise SystemExit(1)
+        print("ERROR: Pass an URL as an argument or use option -u")
+        return [], []
 
     if opts.resume and (len(args) > 0 or opts.urlfile):
         parser.print_help(sys.stderr)
-        parser.error("option -r cannot be used with option -f nor with an argument")
-        raise SystemExit(1)
+        print("ERROR: Option -r cannot be used with option -u nor with an argument")
+        return [], []
 
     return opts, args
 
@@ -260,10 +264,12 @@ def compute(obj):
     obj.crawl()  # the output is stored in job.stdout
 
 
-def main():
+def main(argv):
 
     # parse command line options
-    opts, args = parse_options()
+    opts, args = parse_options(argv)
+    if not (opts or args):
+        return 1
 
     urlfile = opts.urlfile
     csvfile = opts.csvfile
@@ -271,8 +277,8 @@ def main():
     dbpass = opts.dbpass
     dbhost = opts.dbhost
     dbport = opts.dbport
+    dbschema = opts.dbschema
     depth = opts.depth
-    dbschema = "crawler" # default database schema
     resume = opts.resume
     cluster_jobs = opts.cluster_jobs
 
@@ -288,7 +294,7 @@ def main():
         engine.execute("USE " + dbschema)
     except Exception as e:
         print("ERROR: Can't connect to database (%s)" % e)
-        raise SystemExit(1)
+        return 1
 
     # if resume previous crawl, do not clean database
     if not resume:
@@ -299,14 +305,14 @@ def main():
                     url_list = [line.strip() for line in file.readlines()]
                 if not url_list:
                     print("No data in file %s" % urlfile)
-                    raise SystemExit(1)
+                    return 1
                 print("Read file %s" % urlfile)
             except IOError as error:
                 print("I/O error({0}): {1}".format(error.errno, error.strerror))
-                raise SystemExit(1)
+                return 1
             except:  # handle other exceptions such as attribute errors
                 print("Unexpected error:", sys.exc_info()[0])
-                raise SystemExit(1)
+                return 1
         else:
             # URL in command line argument
             url_list = [args[0]]
@@ -370,15 +376,17 @@ def main():
             print("Write file %s" % csvfile)
         except IOError as error:
             print("I/O error({0}): {1}".format(error.errno, error.strerror))
-            raise SystemExit(1)
+            return 1
         except:  # handle other exceptions such as attribute errors
             print("Unexpected error:", sys.exc_info()[0])
-            raise SystemExit(1)
+            return 1
 
         session.close()
 
     engine.dispose()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    result = main(sys.argv[1:])
+    sys.exit(result)
