@@ -57,7 +57,7 @@ A .csv file with a list of the found products can be generated at the end.
 
 Launch **crawler.py** with the following options:
 
-e.g. **crawler.py -U crawler -p abc123 -u sites.txt -c products -j 5**
+e.g. **crawler.py -U crawler -p abc123 'http://www.example.com/'**
 
 In the above example, the database user 'crawler' must have privileges to create and drop schemas and tables.
 
@@ -77,7 +77,10 @@ In the above example, the database user 'crawler' must have privileges to create
                             Database host name
       -P DBPORT, --dbport=DBPORT
                             Database port
+      -s DBSCHEMA, --dbschema=DBSCHEMA
+                            Database schema
+      -d DEPTH, --depth=DEPTH
+                            Maximum depth to traverse
       -r, --resume          Resume previous crawl after an interruption
       -j CLUSTER_JOBS, --cluster-jobs=CLUSTER_JOBS
                             Number of jobs to run in cluster nodes
-
