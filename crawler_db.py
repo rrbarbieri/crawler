@@ -16,8 +16,8 @@ class Status(enum.Enum):
 class Link(Base):
     __tablename__ = 'link'
 
-    depth = Column(Integer, primary_key=True)
     url = Column(String(1022), primary_key=True)
+    depth = Column(Integer, nullable=False)
     status = Column(EnumType(Status, name='url_status'), nullable=False, default=Status.new, index=True)
 
     def __init__(self, url, depth=1, status=Status.new):

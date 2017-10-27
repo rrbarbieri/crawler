@@ -16,7 +16,7 @@ class Crawler(object):
     # variables declared below, including imported modules,
     # are available only in jobs running in cluster nodes
 
-    def __init__(self, i=0, dbuser='', dbpass='', dbhost='', dbport=0):
+    def __init__(self, i=0, dbuser='', dbpass='', dbhost='', dbport=0, dbschema='', depth=0):
 
         self.job_num = i
 
@@ -25,6 +25,8 @@ class Crawler(object):
         self.dbpass = dbpass
         self.dbhost = dbhost
         self.dbport = dbport
+        self.depth = depth
+        self.dbschema = dbschema
 
         self.num_processed = 0  # Links processed
         self.host = ''  # root URL
@@ -71,21 +73,24 @@ class Crawler(object):
         from crawler_db import (Status, Link, Product)
         from crawler_web import Webpage
 
+        import sqlalchemy
         from sqlalchemy import (create_engine, exc)
         from sqlalchemy.engine.url import URL
-        from sqlalchemy.orm import Session
+        from sqlalchemy.orm import (Session, exc)
 
         # connect to database
-        engine = create_engine(URL("mysql+mysqlconnector",
+        try:
+            engine = create_engine(URL("mysql+mysqlconnector",
                                    username=self.dbuser,
                                    password=self.dbpass,
                                    host=self.dbhost,
-                                   port=self.dbport
-                                   ))
+                                   port=self.dbport))
+            engine.execute("USE " + self.dbschema)  # select database
+        except Exception as e:
+            print("ERROR: Can't connect to database (%s)" % e)
+            return 1
 
-        engine.execute("USE crawler")  # select database
         session = Session(engine)
-
         start_time = time.time()
 
         num_retries = 3
@@ -113,40 +118,46 @@ class Crawler(object):
                 status = Status.visited
                 try:
                     page = Webpage(this_url)
-                    page.fetch()
-                    for link_url in [self._pre_visit_url_condense(l) for l in page.out_urls]:
-                        # apply pre-visit filters.
-                        do_not_follow = [f for f in self.pre_visit_filters if not f(link_url)]
+                    if not page.fetch():
+                        status = Status.error
+                    else:
+                        if not self.depth or (link_depth <= self.depth):
+                            for link_url in [self._pre_visit_url_condense(l) for l in page.out_urls]:
+                                # apply pre-visit filters.
+                                do_not_follow = [f for f in self.pre_visit_filters if not f(link_url)]
 
-                        # if no filters failed, process URL
-                        if [] == do_not_follow:
-                            new_link = Link(link_url, depth=link_depth)
+                                # if no filters failed, process URL
+                                if [] == do_not_follow:
+                                    new_link = Link(link_url, depth=link_depth)
+                                    session.begin_nested()  # establish a savepoint
+                                    session.add(new_link)
+                                    try:
+                                        session.flush()
+                                    except sqlalchemy.exc.IntegrityError:  # rollback duplicated entry
+                                        session.rollback()
+                                        continue
+                                    except exc.FlushError:  # rollback duplicated entry
+                                        session.rollback()
+                                        continue
+                                    except:
+                                        session.rollback()
+                                        raise
+                                    session.commit()
+
+                        # apply product filters.
+                        is_product = [f for f in self.product_filters if not f(page)]
+
+                        # if no filters failed, process product
+                        if [] == is_product:
+                            product = Product(this_url, title=page.title, name=page.product_name)
                             session.begin_nested()  # establish a savepoint
-                            session.add(new_link)
+                            session.add(product)
                             try:
                                 session.flush()
-                            except exc.IntegrityError:  # rollback duplicated entry
-                                session.rollback()
-                                continue
                             except:
                                 session.rollback()
                                 raise
                             session.commit()
-
-                    # apply product filters.
-                    is_product = [f for f in self.product_filters if not f(page)]
-
-                    # if no filters failed, process product
-                    if [] == is_product:
-                        product = Product(this_url, title=page.title, name=page.product_name)
-                        session.begin_nested()  # establish a savepoint
-                        session.add(product)
-                        try:
-                            session.flush()
-                        except:
-                            session.rollback()
-                            raise
-                        session.commit()
 
                 except Exception as e:
                     print("ERROR: Can't process url '%s' (%s)" % (this_url, e))
@@ -177,6 +188,7 @@ class Crawler(object):
 
         session.close()
         engine.dispose()
+        return 0
 
 
 def parse_options():
@@ -210,6 +222,10 @@ def parse_options():
     parser.add_option("-P", "--dbport",
                       action="store", type="string", dest="dbport",
                       help="Database port"),
+
+    parser.add_option("-d", "--depth",
+                      action="store", type="int", default=0, dest="depth",
+                      help="Maximum depth to traverse")
 
     parser.add_option("-r", "--resume", action="store_true", dest="resume",
                       default=False, help="Resume previous crawl after an interruption")
@@ -255,20 +271,24 @@ def main():
     dbpass = opts.dbpass
     dbhost = opts.dbhost
     dbport = opts.dbport
+    depth = opts.depth
+    dbschema = "crawler" # default database schema
     resume = opts.resume
     cluster_jobs = opts.cluster_jobs
 
     # connect to database
-    engine = create_engine(URL("mysql+mysqlconnector",
+    try:
+        engine = create_engine(URL("mysql+mysqlconnector",
                                username=dbuser,
                                password=dbpass,
                                host=dbhost,
-                               port=dbport
-                               ))
-
-    # create database schema
-    engine.execute("CREATE DATABASE IF NOT EXISTS crawler")
-    engine.execute("USE crawler")
+                               port=dbport))
+        # create database schema
+        engine.execute("CREATE DATABASE IF NOT EXISTS " + dbschema)
+        engine.execute("USE " + dbschema)
+    except Exception as e:
+        print("ERROR: Can't connect to database (%s)" % e)
+        raise SystemExit(1)
 
     # if resume previous crawl, do not clean database
     if not resume:
@@ -312,7 +332,7 @@ def main():
         cluster = dispy.JobCluster(compute, depends=[Crawler])
         jobs = []
         for i in range(1, cluster_jobs + 1):
-            crawler = Crawler(i, dbuser, dbpass, dbhost, dbport)  # create object of Crawler
+            crawler = Crawler(i, dbuser, dbpass, dbhost, dbport, dbschema, depth)  # create object of Crawler
             job = cluster.submit(crawler)  # it is sent to a node for executing 'compute'
             job.id = crawler  # store this object for later use
             jobs.append(job)
@@ -322,7 +342,7 @@ def main():
             job()  # wait for job to finish
             print('Job %s:\n%s\n%s\n%s' % (job.id.job_num, job.stdout, job.stderr, job.exception))
     else:  # run in standalone mode
-        crawler = Crawler(0, dbuser, dbpass, dbhost, dbport)
+        crawler = Crawler(0, dbuser, dbpass, dbhost, dbport, dbschema, depth)
         crawler.crawl()
 
     # write product list to .csv file

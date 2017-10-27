@@ -58,12 +58,12 @@ class Webpage(object):
                     print("ERROR: %s -> %s" % (error, error.url))
                 else:
                     print("ERROR: %s" % error)
-                tags = []
+                return False
             except urllib.error.URLError as error:
                 print("ERROR: %s" % error)
-                tags = []
+                return False
             except OpaqueDataException:
-                tags = []
+                return False
 
             for tag in tags:
                 href = tag.get("href")
@@ -71,3 +71,4 @@ class Webpage(object):
                     url = urllib.parse.urljoin(self.url, escape(href))
                     if url not in self.url and bool(urllib.parse.urlparse(url).netloc):
                         self.out_urls.append(url)
+            return True
